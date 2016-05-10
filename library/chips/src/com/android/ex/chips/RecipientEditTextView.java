@@ -243,6 +243,8 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
 
     private ItemSelectedListener itemSelectedListener;
 
+    private boolean mShowActionMode = true;
+
     public RecipientEditTextView(Context context, AttributeSet attrs) {
         super(context, attrs);
         setChipDimensions(context, attrs);
@@ -1484,9 +1486,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
         boolean handled = super.onTouchEvent(event);
         int action = event.getAction();
         boolean chipWasSelected = false;
-        if (mSelectedChip == null) {
-            mGestureDetector.onTouchEvent(event);
-        }
+        mGestureDetector.onTouchEvent(event);
         if (mCopyAddress == null && action == MotionEvent.ACTION_UP) {
             float x = event.getX();
             float y = event.getY();
@@ -1893,7 +1893,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
      */
     @Override
     public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-        return false;
+        return mShowActionMode;
     }
 
     // Visible for testing.
@@ -2085,7 +2085,8 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
             int spanStart = spannable.getSpanStart(currentChip);
             int spanEnd = spannable.getSpanEnd(currentChip);
             spannable.removeSpan(currentChip);
-            editable.delete(spanStart, spanEnd);
+            // Eliminate the space that is auto placed on each chip: spanEnd + 1
+            editable.delete(spanStart, spanEnd + 1);
             setCursorVisible(true);
             setSelection(editable.length());
             editable.append(text);
@@ -2512,7 +2513,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
                     int end = getSelectionEnd();
                     Editable editable = getText();
                     if (start >= 0 && end >= 0 && start != end) {
-                        editable.append(paste, start, end);
+                        editable.replace(start, end, paste);
                     } else {
                         editable.insert(end, paste);
                     }
@@ -2867,21 +2868,23 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
 
     @Override
     public void onLongPress(MotionEvent event) {
-        if (mSelectedChip != null) {
-            return;
-        }
         float x = event.getX();
         float y = event.getY();
         final int offset = putOffsetInRange(x, y);
         DrawableRecipientChip currentChip = findChip(offset);
         if (currentChip != null) {
             if (mDragEnabled) {
+                mShowActionMode = false;
                 // Start drag-and-drop for the selected chip.
                 startDrag(currentChip);
             } else {
+                mShowActionMode = false;
                 // Copy the selected chip email address.
                 showCopyDialog(currentChip.getEntry().getDestination());
             }
+        } else {
+            // Show Android's Cut/Paste box
+            mShowActionMode = true;
         }
     }
 
