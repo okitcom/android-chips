@@ -1,4 +1,7 @@
 apply plugin: 'com.android.library'
+apply plugin: 'com.github.dcendents.android-maven'
+
+group='com.github.okitcom'
 
 android {
     compileSdkVersion Integer.parseInt(project.COMPILE_SDK)
@@ -19,5 +22,3 @@ android {
 dependencies {
     compile "com.android.support:support-v4:${ANDROID_SUPPORT_VERSION}"
 }
-
-apply from: 'https://raw.github.com/klinker24/gradle-mvn-push/master/gradle-mvn-push.gradle'
