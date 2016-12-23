@@ -65,7 +65,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
 
     private static final char COMMIT_CHAR_SEMICOLON = ';';
 
-    private static final char COMMIT_CHAR_SPACE = ' ';
+    private static final char COMMIT_CHAR_SPACE = '\n';
 
     private static final String SEPARATOR = String.valueOf(COMMIT_CHAR_COMMA)
             + String.valueOf(COMMIT_CHAR_SPACE);
@@ -180,6 +180,16 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
     private boolean mTriedGettingScrollView;
 
     private boolean mDragEnabled = false;
+
+    public boolean filterEnabled = true;
+
+    public boolean isFilterEnabled() {
+        return filterEnabled;
+    }
+
+    public void setFilterEnabled(boolean filterEnabled) {
+        this.filterEnabled = filterEnabled;
+    }
 
     // This pattern comes from android.util.Patterns. It has been tweaked to handle a "1" before
     // parens, so numbers such as "1 (425) 222-2342" match.
@@ -669,7 +679,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
             }
         }
 
-        return null;
+        return mDefaultContactPhoto;
     }
 
     /**
@@ -1409,6 +1419,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
      */
     @Override
     protected void performFiltering(CharSequence text, int keyCode) {
+        if (!filterEnabled) return;
         if (TextUtils.isEmpty(text)) {
             getFilter().filter("", this);
             return;
@@ -1486,12 +1497,18 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
                     if (mSelectedChip != null && mSelectedChip != currentChip) {
                         clearSelectedChip();
                         mSelectedChip = selectChip(currentChip);
+                        setMaxLength(0);
+                        this.setFilterEnabled(false);
                     } else if (mSelectedChip == null) {
                         setSelection(getText().length());
                         commitDefault();
                         mSelectedChip = selectChip(currentChip);
+                        setMaxLength(Integer.MAX_VALUE);
+                        this.setFilterEnabled(true);
                     } else {
                         onClick(mSelectedChip, offset, x, y);
+                        setMaxLength(0);
+                        this.setFilterEnabled(false);
                     }
                 }
                 chipWasSelected = true;
@@ -1506,14 +1523,19 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
         return handled;
     }
 
+    public void setMaxLength(int pLength) {
+        InputFilter[] fArray = new InputFilter[1];
+        fArray[0] = new InputFilter.LengthFilter(pLength);
+        this.setFilters(fArray);
+    }
+
     private void scrollLineIntoView(int line) {
         if (mScrollView != null) {
             mScrollView.smoothScrollBy(0, calculateOffsetFromBottom(line));
         }
     }
 
-    private void showAlternates(final DrawableRecipientChip currentChip,
-            final ListPopupWindow alternatesPopup, final int width) {
+    private void showAlternates(final DrawableRecipientChip currentChip, final ListPopupWindow alternatesPopup, final int width) {
         new AsyncTask<Void, Void, ListAdapter>() {
             @Override
             protected ListAdapter doInBackground(final Void... params) {
@@ -1747,7 +1769,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
         submitItem(entry);
     }
 
-    private void submitItem(RecipientEntry entry) {
+    public void submitItem(RecipientEntry entry) {
         if (entry == null) {
             return;
         }
@@ -2079,7 +2101,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
                 if (mNoChips) {
                     return null;
                 }
-                newChip = constructChipSpan(currentChip.getEntry(), true, false);
+                newChip = constructChipSpan(currentChip.getEntry(), true, true);
             } catch (NullPointerException e) {
                 Log.e(TAG, e.getMessage(), e);
                 return null;
@@ -2099,11 +2121,15 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
             setCursorVisible(false);
             return newChip;
         } else {
+
             int start = getChipStart(currentChip);
             int end = getChipEnd(currentChip);
             getSpannable().removeSpan(currentChip);
             DrawableRecipientChip newChip;
             try {
+                if (mNoChips) {
+                    return null;
+                }
                 newChip = constructChipSpan(currentChip.getEntry(), true, false);
             } catch (NullPointerException e) {
                 Log.e(TAG, e.getMessage(), e);
@@ -2120,9 +2146,34 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
             if (shouldShowEditableText(newChip)) {
                 scrollLineIntoView(getLayout().getLineForOffset(getChipStart(newChip)));
             }
-            showAlternates(newChip, mAlternatesPopup, getWidth());
+            showAddress(newChip, mAddressPopup, getWidth());
             setCursorVisible(false);
             return newChip;
+
+//            int start = getChipStart(currentChip);
+//            int end = getChipEnd(currentChip);
+//            getSpannable().removeSpan(currentChip);
+//            DrawableRecipientChip newChip;
+//            try {
+//                newChip = constructChipSpan(currentChip.getEntry(), true, false);
+//            } catch (NullPointerException e) {
+//                Log.e(TAG, e.getMessage(), e);
+//                return null;
+//            }
+//            Editable editable = getText();
+//            QwertyKeyListener.markAsReplaced(editable, start, end, "");
+//            if (start == -1 || end == -1) {
+//                Log.d(TAG, "The chip being selected no longer exists but should.");
+//            } else {
+//                editable.setSpan(newChip, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+//            }
+//            newChip.setSelected(true);
+//            if (shouldShowEditableText(newChip)) {
+//                scrollLineIntoView(getLayout().getLineForOffset(getChipStart(newChip)));
+//            }
+//            showAlternates(newChip, mAlternatesPopup, getWidth());
+//            setCursorVisible(false);
+//            return newChip;
         }
     }
 
@@ -2149,6 +2200,8 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 unselectChip(currentChip);
+                setMaxLength(0);
+                setFilterEnabled(false);
                 popup.dismiss();
             }
         });
@@ -2306,7 +2359,7 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
     }
 
     public void showAllContacts() {
-        dismissDropDownOnItemSelected(false);
+        dismissDropDownOnItemSelected(true);
         getHandler().postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -3008,6 +3061,15 @@ public class RecipientEditTextView extends MultiAutoCompleteTextView implements
     public void setPostSelectedAction(ItemSelectedListener listener) {
         itemSelectedListener = listener;
     }
+
+    public void dismissAddressPopup() {
+        if (mAddressPopup == null) {
+            return;
+        } else {
+            mAddressPopup.dismiss();
+        }
+    }
+
 
     public interface ItemSelectedListener {
         public void onItemSelected();

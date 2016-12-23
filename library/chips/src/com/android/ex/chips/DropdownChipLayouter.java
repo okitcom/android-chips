@@ -88,7 +88,7 @@ public class DropdownChipLayouter {
             case RECIPIENT_ALTERNATES:
                 if (position != 0) {
                     displayName = null;
-                    showImage = false;
+                    showImage = true;
                 }
                 break;
             case SINGLE_RECIPIENT:
@@ -142,7 +142,7 @@ public class DropdownChipLayouter {
             return;
         }
 
-        if (text != null) {
+        if (text != null && !text.equals("(null)")) {
             view.setText(text);
             view.setVisibility(View.VISIBLE);
         } else {
@@ -154,8 +154,8 @@ public class DropdownChipLayouter {
      * Binds the avatar icon to the image view. If we don't want to show the image, hides the
      * image view.
      */
-    protected void bindIconToView(boolean showImage, RecipientEntry entry, ImageView view,
-        AdapterType type) {
+    protected void bindIconToView(boolean showImage, RecipientEntry entry, ImageView view, AdapterType type) {
+        byte[] photoBytes = null;
         if (view == null) {
             return;
         }
@@ -163,7 +163,7 @@ public class DropdownChipLayouter {
         if (showImage) {
             switch (type) {
                 case BASE_RECIPIENT:
-                    byte[] photoBytes = entry.getPhotoBytes();
+                     photoBytes = entry.getPhotoBytes();
                     if (photoBytes != null && photoBytes.length > 0) {
                         final Bitmap photo = ChipsUtil.getClip(BitmapFactory.decodeByteArray(photoBytes, 0,
                             photoBytes.length));
@@ -184,6 +184,15 @@ public class DropdownChipLayouter {
                     }
                     break;
                 case SINGLE_RECIPIENT:
+                    photoBytes = entry.getPhotoBytes();
+                    if (photoBytes != null && photoBytes.length > 0) {
+                        final Bitmap photo = ChipsUtil.getClip(BitmapFactory.decodeByteArray(photoBytes, 0,
+                                photoBytes.length));
+                        view.setImageBitmap(photo);
+                    } else {
+                        BaseRecipientAdapter.tryFetchPhoto(entry, mContext.getContentResolver(), null, true, -1);
+                        view.setImageResource(getDefaultPhotoResId());
+                    }
                 default:
                     break;
             }

@@ -32,10 +32,10 @@ import android.os.Message;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Photo;
 import android.provider.ContactsContract.Directory;
-import android.support.v4.util.LruCache;
 import android.text.TextUtils;
 import android.text.util.Rfc822Token;
 import android.util.Log;
+import android.util.LruCache;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -216,6 +216,36 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
             this.existingDestinations = existingDestinations;
             this.paramsList = paramsList;
         }
+
+        public void addEntries(List<RecipientEntry> pEntries) {
+            if (entries != null && pEntries != null) {
+                entries.addAll(pEntries);
+            }
+        }
+
+        public void addEntryMap(LinkedHashMap<Long, List<RecipientEntry>> pEntryMap) {
+            if (entryMap != null && pEntryMap != null) {
+                entryMap.putAll(pEntryMap);
+            }
+        }
+
+        public void addExistingDestinations(Set<String> pExistingDestinations) {
+            if (existingDestinations != null && pExistingDestinations != null) {
+                existingDestinations.addAll(pExistingDestinations);
+            }
+        }
+
+        public void addNonAggregatedEntries(List<RecipientEntry> pNonAggregatedEntries) {
+            if (nonAggregatedEntries != null && pNonAggregatedEntries != null) {
+                nonAggregatedEntries.addAll(pNonAggregatedEntries);
+            }
+        }
+
+        public void addDirectorySearchParams(List<DirectorySearchParams> pParamsList) {
+            if (paramsList != null && pParamsList != null) {
+                paramsList.addAll(pParamsList);
+            }
+        }
     }
 
     /**
@@ -236,8 +266,10 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
             }
 
             final FilterResults results = new FilterResults();
-            Cursor defaultDirectoryCursor = null;
-            Cursor directoryCursor = null;
+            Cursor defaultPhoneDirectoryCursor = null;
+            Cursor defaultEmailDirectoryCursor = null;
+            Cursor directoryPhoneCursor = null;
+            Cursor directoryEmailCursor = null;
             boolean limitResults = true;
 
             if (TextUtils.isEmpty(constraint)) {
@@ -245,34 +277,108 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
             }
 
             try {
-                defaultDirectoryCursor = doQuery(constraint, limitResults ? mPreferredMaxResultCount : -1,
+                defaultPhoneDirectoryCursor = doQueryForPhoneNumberr(constraint, limitResults ? mPreferredMaxResultCount : -1,
                         null /* directoryId */);
 
-                if (defaultDirectoryCursor == null) {
+                defaultEmailDirectoryCursor = doQueryForEmail(constraint, limitResults ? mPreferredMaxResultCount : -1,
+                        null /* directoryId */);
+
+                if (defaultPhoneDirectoryCursor == null && defaultEmailDirectoryCursor == null) {
                     if (DEBUG) {
                         Log.w(TAG, "null cursor returned for default Email filter query.");
                     }
-                } else {
+                } else if (defaultPhoneDirectoryCursor != null && defaultEmailDirectoryCursor != null){
+
+                    final LinkedHashMap<Long, List<RecipientEntry>> entryMap = new LinkedHashMap<Long, List<RecipientEntry>>();
+                    final List<RecipientEntry> nonAggregatedEntries = new ArrayList<RecipientEntry>();
+                    final Set<String> existingDestinations = new HashSet<String>();
+
+                    final LinkedHashMap<Long, List<RecipientEntry>> entryMapEmail = new LinkedHashMap<Long, List<RecipientEntry>>();
+                    final List<RecipientEntry> nonAggregatedEntriesEmail = new ArrayList<RecipientEntry>();
+                    final Set<String> existingDestinationsEmail = new HashSet<String>();
+
+                    while (defaultPhoneDirectoryCursor.moveToNext()) {
+                        putOneEntry(new TemporaryEntry(defaultPhoneDirectoryCursor, null /* directoryId */),
+                                true, entryMap, nonAggregatedEntries, existingDestinations);
+                    }
+
+                    while (defaultEmailDirectoryCursor.moveToNext()) {
+                        putOneEntry(new TemporaryEntry(defaultEmailDirectoryCursor, null /* directoryId */),
+                                true, entryMapEmail, nonAggregatedEntriesEmail, existingDestinationsEmail);
+                    }
+
+                    final List<RecipientEntry> entries = constructEntryList(entryMap, nonAggregatedEntries);
+                    final List<RecipientEntry> entriesEmail = constructEntryList(entryMapEmail, nonAggregatedEntriesEmail);
+
+                    // After having local results, check the size of results. If the results are
+                    // not enough, we search remote directories, which will take longer time.
+                    final int limit = mPreferredMaxResultCount - existingDestinations.size();
+                    final int limitEmail = mPreferredMaxResultCount - existingDestinationsEmail.size();
+                    final List<DirectorySearchParams> paramsList;
+                    final List<DirectorySearchParams> paramsListEmail;
+                    if (limit > 0 && limitResults) {
+                        if (DEBUG) {
+                            Log.d(TAG, "More entries should be needed (current: "
+                                    + existingDestinations.size()
+                                    + ", remaining limit: " + limit + ") ");
+                        }
+                        directoryPhoneCursor = mContentResolver.query(
+                                DirectoryListQuery.URI, DirectoryListQuery.PROJECTION,
+                                null, null, null);
+                        paramsList = setupOtherDirectories(mContext, directoryPhoneCursor, mAccount);
+                    } else {
+                        // We don't need to search other directories.
+                        paramsList = null;
+                    }
+
+                    if (limitEmail > 0 && limitResults) {
+                        if (DEBUG) {
+                            Log.d(TAG, "More entries should be needed (current: "
+                                    + existingDestinationsEmail.size()
+                                    + ", remaining limit: " + limitEmail + ") ");
+                        }
+                        directoryEmailCursor = mContentResolver.query(
+                                DirectoryListQuery.URI, DirectoryListQuery.PROJECTION,
+                                null, null, null);
+                        paramsListEmail = setupOtherDirectories(mContext, directoryEmailCursor, mAccount);
+                    } else {
+                        // We don't need to search other directories.
+                        paramsListEmail = null;
+                    }
+
+                    DefaultFilterResult filterResult =  new DefaultFilterResult(
+                            entries, entryMap, nonAggregatedEntries,
+                            existingDestinations, paramsList);
+
+                    filterResult.addEntries(entriesEmail);
+                    filterResult.addDirectorySearchParams(paramsListEmail);
+                    filterResult.addEntryMap(entryMapEmail);
+                    filterResult.addExistingDestinations(existingDestinationsEmail);
+                    filterResult.addNonAggregatedEntries(nonAggregatedEntriesEmail);
+
+                    results.values = filterResult;
+                    results.count = 1;
+
+
+                } else if (defaultEmailDirectoryCursor != null) {
+
                     // These variables will become mEntries, mEntryMap, mNonAggregatedEntries, and
                     // mExistingDestinations. Here we shouldn't use those member variables directly
                     // since this method is run outside the UI thread.
-                    final LinkedHashMap<Long, List<RecipientEntry>> entryMap =
-                            new LinkedHashMap<Long, List<RecipientEntry>>();
-                    final List<RecipientEntry> nonAggregatedEntries =
-                            new ArrayList<RecipientEntry>();
+                    final LinkedHashMap<Long, List<RecipientEntry>> entryMap = new LinkedHashMap<Long, List<RecipientEntry>>();
+                    final List<RecipientEntry> nonAggregatedEntries = new ArrayList<RecipientEntry>();
                     final Set<String> existingDestinations = new HashSet<String>();
 
-                    while (defaultDirectoryCursor.moveToNext()) {
+                    while (defaultEmailDirectoryCursor.moveToNext()) {
                         // Note: At this point each entry doesn't contain any photo
                         // (thus getPhotoBytes() returns null).
-                        putOneEntry(new TemporaryEntry(defaultDirectoryCursor,
-                                null /* directoryId */),
+                        putOneEntry(new TemporaryEntry(defaultEmailDirectoryCursor,
+                                        null /* directoryId */),
                                 true, entryMap, nonAggregatedEntries, existingDestinations);
                     }
 
                     // We'll copy this result to mEntry in publicResults() (run in the UX thread).
-                    final List<RecipientEntry> entries = constructEntryList(
-                            entryMap, nonAggregatedEntries);
+                    final List<RecipientEntry> entries = constructEntryList(entryMap, nonAggregatedEntries);
 
                     // After having local results, check the size of results. If the results are
                     // not enough, we search remote directories, which will take longer time.
@@ -284,10 +390,10 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
                                     + existingDestinations.size()
                                     + ", remaining limit: " + limit + ") ");
                         }
-                        directoryCursor = mContentResolver.query(
+                        directoryEmailCursor = mContentResolver.query(
                                 DirectoryListQuery.URI, DirectoryListQuery.PROJECTION,
                                 null, null, null);
-                        paramsList = setupOtherDirectories(mContext, directoryCursor, mAccount);
+                        paramsList = setupOtherDirectories(mContext, directoryEmailCursor, mAccount);
                     } else {
                         // We don't need to search other directories.
                         paramsList = null;
@@ -297,13 +403,20 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
                             entries, entryMap, nonAggregatedEntries,
                             existingDestinations, paramsList);
                     results.count = 1;
+
                 }
             } finally {
-                if (defaultDirectoryCursor != null) {
-                    defaultDirectoryCursor.close();
+                if (defaultPhoneDirectoryCursor != null) {
+                    defaultPhoneDirectoryCursor.close();
                 }
-                if (directoryCursor != null) {
-                    directoryCursor.close();
+                if (defaultEmailDirectoryCursor != null) {
+                    defaultEmailDirectoryCursor.close();
+                }
+                if (directoryPhoneCursor != null) {
+                    directoryPhoneCursor.close();
+                }
+                if (directoryEmailCursor != null) {
+                    directoryEmailCursor.close();
                 }
             }
             return results;
@@ -388,21 +501,31 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
             if (!TextUtils.isEmpty(constraint)) {
                 final ArrayList<TemporaryEntry> tempEntries = new ArrayList<TemporaryEntry>();
 
-                Cursor cursor = null;
+                Cursor phoneCursor = null;
+                Cursor emailCursor = null;
                 try {
                     // We don't want to pass this Cursor object to UI thread (b/5017608).
                     // Assuming the result should contain fairly small results (at most ~10),
                     // We just copy everything to local structure.
-                    cursor = doQuery(constraint, getLimit(), mParams.directoryId);
+                    phoneCursor = doQueryForPhoneNumberr(constraint, getLimit(), mParams.directoryId);
+                    if (phoneCursor != null) {
+                        while (phoneCursor.moveToNext()) {
+                            tempEntries.add(new TemporaryEntry(phoneCursor, mParams.directoryId));
+                        }
+                    }
 
-                    if (cursor != null) {
-                        while (cursor.moveToNext()) {
-                            tempEntries.add(new TemporaryEntry(cursor, mParams.directoryId));
+                    emailCursor = doQueryForEmail(constraint, getLimit(), mParams.directoryId);
+                    if (emailCursor != null) {
+                        while (emailCursor.moveToNext()) {
+                            tempEntries.add(new TemporaryEntry(emailCursor, mParams.directoryId));
                         }
                     }
                 } finally {
-                    if (cursor != null) {
-                        cursor.close();
+                    if (phoneCursor != null) {
+                        phoneCursor.close();
+                    }
+                    if (emailCursor != null) {
+                        emailCursor.close();
                     }
                 }
                 if (!tempEntries.isEmpty()) {
@@ -933,15 +1056,13 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
         }
     }
 
-    private Cursor doQuery(CharSequence constraint, int limit, Long directoryId) {
-        final Uri.Builder builder = mQuery.getContentFilterUri().buildUpon();
+    private Cursor doQuery(final Uri.Builder uriBuilder, CharSequence constraint, int limit, Long directoryId) {
+        final Uri.Builder builder = uriBuilder;
         builder.appendPath(constraint.toString());
-        builder.appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY,
-                String.valueOf(limit + ALLOWANCE_FOR_DUPLICATES));
+        builder.appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY, String.valueOf(limit + ALLOWANCE_FOR_DUPLICATES));
 
         if (directoryId != null) {
-            builder.appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY,
-                    String.valueOf(directoryId));
+            builder.appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY, String.valueOf(directoryId));
         }
         if (mAccount != null) {
             builder.appendQueryParameter(PRIMARY_ACCOUNT_NAME, mAccount.name);
@@ -964,14 +1085,15 @@ public class BaseRecipientAdapter extends BaseAdapter implements Filterable, Acc
         return cursor;
     }
 
-    // TODO: This won't be used at all. We should find better way to quit the thread..
-    /*public void close() {
-        mEntries = null;
-        mPhotoCacheMap.evictAll();
-        if (!sPhotoHandlerThread.quit()) {
-            Log.w(TAG, "Failed to quit photo handler thread, ignoring it.");
-        }
-    }*/
+    private Cursor doQueryForEmail(CharSequence constraint, int limit, Long directoryId) {
+        Log.d(TAG, "Query for email!");
+        return doQuery(Queries.EMAIL.getContentFilterUri().buildUpon(), constraint, limit, directoryId);
+    }
+
+    private Cursor doQueryForPhoneNumberr(CharSequence constraint, int limit, Long directoryId) {
+        Log.d(TAG, "Query for phone!");
+        return doQuery(Queries.PHONE.getContentFilterUri().buildUpon(), constraint, limit, directoryId);
+    }
 
     @Override
     public int getCount() {

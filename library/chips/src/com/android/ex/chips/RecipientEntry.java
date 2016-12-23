@@ -79,6 +79,8 @@ public class RecipientEntry {
     /** See {@link ContactsContract.Contacts#LOOKUP_KEY} */
     private final String mLookupKey;
 
+
+
     private RecipientEntry(int entryType, String displayName, String destination,
             int destinationType, String destinationLabel, long contactId, Long directoryId,
             long dataId, Uri photoThumbnailUri, boolean isFirstLevel, boolean isValid,
